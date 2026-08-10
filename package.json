@@ -9,6 +9,7 @@
     "build": "tsc",
     "test": "tsc && node --test dist/test/",
     "smoke": "tsc && node dist/scripts/smoke.js",
+    "bench": "tsc && node dist/scripts/bench.js",
     "prepublishOnly": "npm run build"
   },
   "keywords": ["mcp", "trafikk", "vegvesen", "norge", "trafikkmeldinger", "vegarbeid"],

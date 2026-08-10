@@ -7,8 +7,17 @@
  * type error rather than as silently missing output.
  */
 
-/** How much of the road is affected. Ordered by severity in `roads.ts`. */
-export type Impact = "none" | "small" | "large" | "very_large" | "unknown";
+/**
+ * How much of the road is affected, listed least severe first.
+ *
+ * The ORDER is the ranking — `impactRank` reads it positionally rather than keeping a
+ * second severity table, and the zod enum at the MCP boundary is built from this same
+ * array. One list, so a new level from upstream cannot be added in one place and
+ * forgotten in another.
+ */
+export const IMPACT_LEVELS = ["unknown", "none", "small", "large", "very_large"] as const;
+
+export type Impact = (typeof IMPACT_LEVELS)[number];
 
 /** Open, regulated (lights, convoy, short closures), or shut. */
 export type RoadStatus = "RoadOpen" | "Regulation" | "RoadClosed";

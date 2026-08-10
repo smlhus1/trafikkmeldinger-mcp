@@ -1,4 +1,4 @@
-import type { Impact, Message } from "./types.js";
+import { IMPACT_LEVELS, type Impact, type Message } from "./types.js";
 
 /**
  * Turning what a human types into what the upstream data actually contains.
@@ -10,19 +10,16 @@ import type { Impact, Message } from "./types.js";
  * dangerous output this server could produce, so the ambiguity is resolved here once.
  */
 
-/** Ranked so callers can ask for "large and worse" without hardcoding an order. */
-const IMPACT_ORDER: Record<Impact, number> = {
-  very_large: 4,
-  large: 3,
-  small: 2,
-  none: 1,
-  unknown: 0,
-};
-
 const CATEGORIES = ["E", "R", "F", "K"] as const;
 
+/**
+ * Severity as a number, so callers can ask for "large and worse" without knowing the
+ * order. Derived from `IMPACT_LEVELS` rather than restating it — an unknown value from
+ * upstream sorts lowest instead of throwing.
+ */
 export function impactRank(impact: Impact | undefined): number {
-  return IMPACT_ORDER[impact ?? "unknown"] ?? 0;
+  const index = IMPACT_LEVELS.indexOf(impact ?? "unknown");
+  return index === -1 ? 0 : index;
 }
 
 /**

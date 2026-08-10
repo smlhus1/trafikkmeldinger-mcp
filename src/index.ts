@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { clearCache, fetchMessages } from "./api.js";
 import { selectMessages, summarise, type Filter } from "./select.js";
-import { TrafficError, type Impact } from "./types.js";
+import { IMPACT_LEVELS, TrafficError, type Impact } from "./types.js";
 
 /**
  * trafikkmeldinger-mcp — Norwegian road traffic messages, filtered to a journey.
@@ -21,8 +21,6 @@ import { TrafficError, type Impact } from "./types.js";
  */
 
 const ATTRIBUTION = "Statens vegvesen. Vilkår: https://www.vegvesen.no/om-oss/om-organisasjonen/apne-data/";
-
-const IMPACT_VALUES = ["none", "small", "large", "very_large", "unknown"] as const;
 
 const server = new McpServer({ name: "trafikkmeldinger", version: "0.1.0" });
 
@@ -80,7 +78,7 @@ server.registerTool(
       kommune: z.array(z.string()).optional().describe("Kommunenavn, f.eks. [\"Ringebu\", \"Øyer\"]."),
       fylke: z.array(z.string()).optional().describe("Fylkesnavn, f.eks. [\"Innlandet\"]."),
       minsteVirkning: z
-        .enum(IMPACT_VALUES)
+        .enum(IMPACT_LEVELS)
         .optional()
         .describe("Utelat alt som påvirker trafikken mindre enn dette. «large» = merkbar forsinkelse."),
       tidspunkt: z
@@ -138,7 +136,7 @@ server.registerTool(
         .optional()
         .describe("ISO-tidspunkt for når du er framme. Standard: 6 timer etter avreise."),
       minsteVirkning: z
-        .enum(IMPACT_VALUES)
+        .enum(IMPACT_LEVELS)
         .optional()
         .describe("Utelat bagateller. Standard: ta med alt."),
       maksAntall: z.number().int().positive().max(200).optional().describe("Standard 50."),
