@@ -1,0 +1,29 @@
+{
+  "name": "trafikkmeldinger-mcp",
+  "version": "0.1.0",
+  "description": "MCP-server for norske trafikkmeldinger — vegarbeid, stengte veier og omkjøringer fra Statens vegvesen, filtrert på ruta og reisetidspunktet ditt",
+  "type": "module",
+  "bin": { "trafikkmeldinger-mcp": "dist/src/index.js" },
+  "files": ["dist/src"],
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node --test dist/test/",
+    "smoke": "tsc && node dist/test/smoke.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["mcp", "trafikk", "vegvesen", "norge", "trafikkmeldinger", "vegarbeid"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smlhus1/trafikkmeldinger-mcp.git"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": { "node": ">=20" }
+}
