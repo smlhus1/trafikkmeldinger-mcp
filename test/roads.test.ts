@@ -52,7 +52,7 @@ test("tomt veifilter betyr alle veier", () => {
 });
 
 test("kommune leses fra locationDescriptionDetails når municipalities er tom", () => {
-  // location.municipalities was populated on 2 of 795 real messages; a filter that
+  // location.municipalities was populated on 2 of 1293 real messages; a filter that
   // trusted it alone would drop almost everything.
   const venabygd = byId("FIXTURE.venabygd");
   assert.equal(venabygd.location?.municipalities?.length, 0);

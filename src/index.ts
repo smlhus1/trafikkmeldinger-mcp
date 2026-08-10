@@ -76,8 +76,11 @@ server.registerTool(
         .array(z.string())
         .optional()
         .describe("Veinummer, f.eks. [\"E6\", \"fv27\"]. Bare tall matcher alle veiklasser."),
-      kommune: z.array(z.string()).optional().describe("Kommunenavn, f.eks. [\"Ringebu\", \"Øyer\"]."),
-      fylke: z.array(z.string()).optional().describe("Fylkesnavn, f.eks. [\"Innlandet\"]."),
+      kommune: z
+        .array(z.string())
+        .optional()
+        .describe("Kommunenavn med æøå, f.eks. [\"Ringebu\", \"Øyer\"]. «Oyer» gir null treff."),
+      fylke: z.array(z.string()).optional().describe("Fylkesnavn med æøå, f.eks. [\"Innlandet\"]."),
       minsteVirkning: z
         .enum(IMPACT_LEVELS)
         .optional()
@@ -131,14 +134,15 @@ server.registerTool(
         .optional()
         .describe(
           "Fylkene ruta går gjennom, f.eks. [\"Østfold\", \"Akershus\", \"Oslo\", \"Innlandet\"]. " +
-            "Tryggest når du ikke kjenner kommunene.",
+            "Tryggest når du ikke kjenner kommunene. Skriv æøå — «Ostfold» gir null treff.",
         ),
       kommuner: z
         .array(z.string())
         .optional()
         .describe(
           "Kommunene ruta går gjennom, f.eks. [\"Eidsvoll\", \"Stange\", \"Ringebu\"]. " +
-            "Mer presist enn fylker, men utelater du én, mister du meldingene der.",
+            "Mer presist enn fylker, men utelater du én, mister du meldingene der. " +
+            "Skriv æøå — «Oyer» gir null treff.",
         ),
       vei: z
         .array(z.string())

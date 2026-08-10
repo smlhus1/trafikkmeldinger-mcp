@@ -32,7 +32,7 @@ export interface Place {
 /**
  * A recurring window, e.g. "20:00-06:00 Mon-Thu between 10 and 14 August".
  *
- * Present on fewer than half the messages (314 of 795 sampled 2026-08-10); when
+ * Present on fewer than half the messages (511 of 1293 measured 2026-08-10); when
  * absent, the message applies continuously between `startTime` and
  * `estimatedEndTime`. Interpreted in `validity.ts`.
  */
@@ -66,7 +66,7 @@ export interface Message {
   validityPeriods?: ValidityPeriod[];
   /**
    * In practice the ONLY reliable source of municipality — `location.municipalities`
-   * was populated on 2 of 795 messages sampled. See `municipalitiesOf` in `roads.ts`.
+   * was populated on 2 of 1293 messages measured. See `municipalitiesOf` in `roads.ts`.
    */
   locationDescriptionDetails?: {
     fromLocation?: Place;

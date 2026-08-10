@@ -33,13 +33,14 @@ som «ingen vegarbeid på strekningen». Det er den farligste feilen denne serve
 et bart tall utvides til alle fire veiklassene (`E27`, `R27`, `F27`, `K27`) framfor å gjette.
 
 **2. Kommune ligger ikke der du tror.** Feltet `location.municipalities` er tomt på nesten alle
-meldinger (2 av 795 i en stikkprøve 10. august 2026). Kommunen står i
-`locationDescriptionDetails`. Et geografisk filter bygget på det strukturerte-utseende feltet
-alene mister nesten alt.
+meldinger — 2 av 1 293 målt 10. august 2026. Kommunen står i `locationDescriptionDetails`. Et
+geografisk filter bygget på det strukturerte-utseende feltet alene mister nesten alt.
 
 Begge er dekket av tester, så en regresjon gir rødt bygg.
 
 ## Installasjon
+
+Krever **Node 20 eller nyere**.
 
 ```bash
 git clone https://github.com/smlhus1/trafikkmeldinger-mcp.git
@@ -87,10 +88,15 @@ gjerne når du kjører.
 meldingene der uten et ord — og fylke kombinert med veinummer treffer nesten like presist.
 Feil skal helle mot å vise for mye, ikke for lite.
 
+**Skriv æ, ø og å.** Stedsnavn sammenlignes eksakt (store og små bokstaver spiller ingen rolle,
+men bokstavene gjør det): `Sør-Fron` treffer, `Sor-Fron` gir null treff — og null treff ser
+nøyaktig ut som en rein vei. Samme gjelder fylker.
+
 Svaret skiller det som **treffer deg** fra det som bare er registrert på strekningen:
 
 ```jsonc
 {
+  "reisevindu": { "avreise": "...", "ankomst": "..." },
   "antallPaaRuta": 19,
   "antallSomTrefferDeg": 13,
   "antallVist": 3,
@@ -133,6 +139,10 @@ deg, sier `melding` allerede det du trenger.
 Generelt oppslag på vei, kommune, fylke og hvor mye det påvirker trafikken. Veinummer kan
 skrives slik folk snakker: `E6`, `fv27`, `riksveg 3`, eller bare `27`.
 
+Uten `tidspunkt` får du alt som er registrert, også nattarbeid som ikke er aktivt akkurat nå.
+Oppgi `tidspunkt` (ISO) for å se kun det som faktisk gjelder da — gjentakelsesreglene tolkes,
+så en tunnel stengt 20:00–06:00 dukker opp for kl. 21 og ikke for kl. 12.
+
 ### `doctor`
 
 Kaller det ekte endepunktet og rapporterer svartid, antall meldinger og hvor mange som har
@@ -141,8 +151,9 @@ gjentakelsesregler. Bruk den når noe oppfører seg rart.
 ## Utvikling
 
 ```bash
-npm test     # enhetstester mot fast fikstur — ingen nettverk
+npm test      # enhetstester mot fast fikstur — ingen nettverk
 npm run smoke # mot ekte API + serveren som prosess (krever nett)
+npm run bench # måler hva rutefilteret koster på en lang tur (krever nett)
 ```
 
 Enhetstestene bruker en frosset fikstur slik at et rødt bygg alltid betyr «koden er feil», ikke
