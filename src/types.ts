@@ -68,7 +68,15 @@ export interface Message {
    * In practice the ONLY reliable source of municipality — `location.municipalities`
    * was populated on 2 of 795 messages sampled. See `municipalitiesOf` in `roads.ts`.
    */
-  locationDescriptionDetails?: { fromLocation?: Place; toLocation?: Place };
+  locationDescriptionDetails?: {
+    fromLocation?: Place;
+    toLocation?: Place;
+    /**
+     * A shorter rendering of the same place than `descriptionOfLocation`, which repeats
+     * the municipality and county once per endpoint. Present on every message sampled.
+     */
+    simpleLocationDescription?: string;
+  };
   location?: {
     isInTunnel?: boolean;
     isOnBridge?: boolean;

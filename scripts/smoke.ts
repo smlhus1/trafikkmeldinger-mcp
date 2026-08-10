@@ -91,7 +91,7 @@ check(
   `${municipalityFromDetails}/${messages.length}`,
 );
 
-const sample = selectMessages(messages, { minImpact: "large", limit: 1 })[0];
+const sample = selectMessages(messages, { minImpact: "large" })[0];
 check("kan oppsummere en melding", Boolean(sample && summarise(sample).sted));
 
 console.log("\n2. Serveren som prosess (MCP over stdio)\n");
@@ -114,16 +114,26 @@ const call = {
   params: {
     name: "langs_ruta",
     arguments: {
-      kommuner: ["Ringebu", "Øyer"],
-      vei: ["E6", "fv27"],
+      // County-based, which is the safe way in when the caller does not know the
+      // municipalities — and deliberately capped low to prove truncation is visible.
+      fylker: ["Innlandet"],
+      vei: ["E6"],
       avreise: "2026-08-10T16:00:00+02:00",
       ankomst: "2026-08-10T22:00:00+02:00",
+      maksAntall: 3,
     },
   },
 };
 
+const missingArea = {
+  jsonrpc: "2.0",
+  id: 4,
+  method: "tools/call",
+  params: { name: "langs_ruta", arguments: { vei: ["E6"] } },
+};
+
 try {
-  const replies = await callServer([init, list, call]);
+  const replies = await callServer([init, list, call, missingArea]);
 
   const listed = replies.find((r) => r.id === 2) as
     | { result?: { tools?: { name: string }[] } }
@@ -144,6 +154,28 @@ try {
   const parsed = text ? JSON.parse(text) : {};
   check("svaret har et reisevindu", Boolean(parsed.reisevindu?.avreise));
   check("svaret oppgir kilde", typeof parsed._kilde === "string");
+  check("fylke alene holder for å definere en strekning", parsed.antallPaaRuta > 0);
+
+  // The defect this release fixes: a capped list must never look complete.
+  check(
+    "avkorting er synlig i svaret",
+    parsed.antallSomTrefferDeg <= 3 || typeof parsed.avkortet === "string",
+    parsed.avkortet ?? `traff ${parsed.antallSomTrefferDeg}, viste ${parsed.antallVist}`,
+  );
+  check(
+    "antallTreff er FØR avkorting, ikke etter",
+    parsed.antallSomTrefferDeg >= parsed.antallVist,
+  );
+
+  const refused = replies.find((r) => r.id === 4) as
+    | { result?: { isError?: boolean; content?: { text?: string }[] } }
+    | undefined;
+  check(
+    "uten fylker/kommuner avvises kallet med en brukbar beskjed",
+    refused?.result?.isError === true &&
+      /fylker|kommuner/i.test(refused.result.content?.[0]?.text ?? ""),
+  );
+
   console.log(`\n   ${parsed.merknad ?? "(ingen merknad)"}`);
 } catch (err) {
   check("serveren som prosess", false, (err as Error).message);

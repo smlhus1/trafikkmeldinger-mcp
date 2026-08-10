@@ -3,8 +3,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { clearCache, fetchMessages } from "./api.js";
-import { selectMessages, summarise, type Filter } from "./select.js";
+import { capped, placeOf, selectMessages, summarise, type Filter } from "./select.js";
 import { IMPACT_LEVELS, TrafficError, type Impact } from "./types.js";
+import { appliesBetween } from "./validity.js";
 
 /**
  * trafikkmeldinger-mcp — Norwegian road traffic messages, filtered to a journey.
@@ -97,15 +98,16 @@ server.registerTool(
         counties: args.fylke,
         minImpact: args.minsteVirkning as Impact | undefined,
         at,
-        limit: args.maksAntall ?? 40,
       };
       const all = await fetchMessages();
       const hits = selectMessages(all, filter);
+      const { vist, avkortet } = capped(hits, args.maksAntall ?? 40);
       return {
-        antall: hits.length,
-        antallTotaltINorge: all.length,
+        antallTreff: hits.length,
+        antallVist: vist.length,
+        ...(avkortet ? { avkortet } : {}),
         gjelderTidspunkt: at?.toISOString() ?? null,
-        meldinger: hits.map((m) => summarise(m)),
+        meldinger: vist.map((m) => summarise(m)),
       };
     }),
 );
@@ -116,20 +118,32 @@ server.registerTool(
     title: "Hva møter jeg på denne bilturen?",
     description:
       "Trafikkmeldinger for en konkret biltur, filtrert på både strekning og når du kjører. " +
-      "Oppgi kommunene ruta går gjennom (det er slik strekningen defineres) og gjerne veinumrene. " +
+      "Definer strekningen med «fylker» ELLER «kommuner» (minst én av dem), og helst «vei». " +
+      "**Er du usikker på hvilke kommuner ruta går gjennom, bruk fylker** — en glemt kommune " +
+      "fjerner meldingene der uten å si fra, mens fylke + vei treffer nesten like presist. " +
       "Oppgi «avreise» og «ankomst» for å skille det som faktisk treffer deg fra alt som er " +
       "registrert på strekningen — nattestengte tunneler og arbeid som bare gjelder hverdager " +
       "blir da vurdert mot reisetidspunktet ditt, ikke mot «akkurat nå». " +
       "Svaret er sortert med det mest inngripende først.",
     inputSchema: {
+      fylker: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Fylkene ruta går gjennom, f.eks. [\"Østfold\", \"Akershus\", \"Oslo\", \"Innlandet\"]. " +
+            "Tryggest når du ikke kjenner kommunene.",
+        ),
       kommuner: z
         .array(z.string())
-        .min(1)
-        .describe("Kommunene ruta går gjennom, f.eks. [\"Eidsvoll\", \"Stange\", \"Ringebu\"]."),
+        .optional()
+        .describe(
+          "Kommunene ruta går gjennom, f.eks. [\"Eidsvoll\", \"Stange\", \"Ringebu\"]. " +
+            "Mer presist enn fylker, men utelater du én, mister du meldingene der.",
+        ),
       vei: z
         .array(z.string())
         .optional()
-        .describe("Begrens til disse veiene, f.eks. [\"E6\", \"fv27\"]. Utelat for alle veier i kommunene."),
+        .describe("Begrens til disse veiene, f.eks. [\"E6\", \"fv27\"]. Utelat for alle veier på strekningen."),
       avreise: z.string().optional().describe("ISO-tidspunkt for når du starter. Standard: nå."),
       ankomst: z
         .string()
@@ -144,6 +158,13 @@ server.registerTool(
   },
   async (args) =>
     run(async () => {
+      if (!args.fylker?.length && !args.kommuner?.length) {
+        throw new TrafficError(
+          "Oppgi «fylker» eller «kommuner» for å definere strekningen. Er du usikker på " +
+            "kommunene, bruk fylker — f.eks. fylker: [\"Innlandet\"], vei: [\"E6\"].",
+        );
+      }
+
       const from = parseTime(args.avreise, "avreise") ?? new Date();
       const to = parseTime(args.ankomst, "ankomst") ?? new Date(from.getTime() + 6 * 3600_000);
       if (to.getTime() < from.getTime()) {
@@ -151,39 +172,38 @@ server.registerTool(
       }
 
       const all = await fetchMessages();
+      // One pass over the place/road filter, then partition by time. Two passes did the
+      // same geographic work twice and made the two lists able to disagree.
       const onRoute = selectMessages(all, {
         roads: args.vei,
         municipalities: args.kommuner,
+        counties: args.fylker,
         minImpact: args.minsteVirkning as Impact | undefined,
       });
-      const during = selectMessages(all, {
-        roads: args.vei,
-        municipalities: args.kommuner,
-        minImpact: args.minsteVirkning as Impact | undefined,
-        from,
-        to,
-        limit: args.maksAntall ?? 50,
-      });
+      const during = onRoute.filter((m) => appliesBetween(m, from, to));
+      const outside = onRoute.filter((m) => !appliesBetween(m, from, to));
 
-      const duringIds = new Set(during.map((m) => m.id));
+      const { vist, avkortet } = capped(during, args.maksAntall ?? 50);
+      const utenfor = capped(outside, 20);
+
       return {
         reisevindu: { avreise: from.toISOString(), ankomst: to.toISOString() },
-        antallPaaRuta: onRoute.length,
-        antallSomTrefferDeg: during.length,
         // Naming the gap explicitly: the difference between these two numbers is the
         // whole point of the tool, and a caller that sees only one of them cannot tell
         // whether a quiet answer means "clear road" or "wrong time filter".
+        antallPaaRuta: onRoute.length,
+        antallSomTrefferDeg: during.length,
+        antallVist: vist.length,
+        ...(avkortet ? { avkortet } : {}),
         merknad:
           `${onRoute.length} meldinger er registrert på strekningen; ${during.length} av dem ` +
           `gjelder i reisevinduet ditt.`,
-        meldinger: during.map((m) => summarise(m, { from, to })),
-        ikkeIReisevinduet: onRoute
-          .filter((m) => !duringIds.has(m.id))
-          .slice(0, 20)
-          .map((m) => ({
-            sted: m.descriptionOfLocation ?? "",
-            naarGjelderDen: m.validPeriodText ?? m.descriptionOfTrafficMessage ?? "",
-          })),
+        meldinger: vist.map((m) => summarise(m, { from, to })),
+        ikkeIReisevinduet: utenfor.vist.map((m) => ({
+          sted: placeOf(m),
+          naarGjelderDen: m.validPeriodText ?? m.descriptionOfTrafficMessage ?? "",
+        })),
+        ...(utenfor.avkortet ? { ikkeIReisevinduetAvkortet: utenfor.avkortet } : {}),
       };
     }),
 );

@@ -23,12 +23,25 @@ export interface Filter {
   /** Keep only messages in force at some point within this window. */
   from?: Date;
   to?: Date;
-  limit?: number;
 }
+// No `limit` here on purpose. Filtering and presentation are separate jobs, and when
+// the cap lived in here the caller could only see the post-slice count — a truncated
+// answer that reported itself as complete. Callers now slice, and say that they did.
 
-/** The compact shape returned over MCP — the readable half of a 3 kB upstream object. */
+/**
+ * The compact shape returned over MCP.
+ *
+ * Every byte here lands in the caller's context window, so a field has to earn its
+ * place. Measured on 2026-08-10, the old shape cost ~704 characters per message and
+ * about 10 000 tokens for a wide route query. Three things were paying nothing:
+ *
+ *   - `id`, which no tool accepts as input — 27 characters of pure ballast.
+ *   - `fylker`, which the caller filtered on and already knows.
+ *   - `naarGjelderDen`, which restates in prose what `melding` mostly already says.
+ *     Kept ONLY where it carries information the caller does not have: when the
+ *     message does NOT apply during their journey, "when does it then" is the point.
+ */
 export interface Summary {
-  id: string;
   sted: string;
   melding: string;
   veier: string[];
@@ -37,13 +50,11 @@ export interface Summary {
   gjelderNaa: boolean;
   gjelderPaaReisen?: boolean;
   naarGjelderDen?: string;
-  start?: string;
   antattSlutt?: string;
   nesteEndring?: string;
   omkjoeringSkiltet?: boolean;
   iTunnel?: boolean;
   kommuner: string[];
-  fylker: string[];
 }
 
 /**
@@ -80,27 +91,63 @@ export function selectMessages(messages: Message[], filter: Filter): Message[] {
     return (a.startTime ?? "").localeCompare(b.startTime ?? "");
   });
 
-  return filter.limit ? hits.slice(0, filter.limit) : hits;
+  return hits;
 }
 
-/** Strips a message down to what a reader actually needs. */
+/**
+ * Cuts a list to size and says so.
+ *
+ * Exists so no caller can report a truncated list as a complete one — the whole point
+ * of taking `limit` out of `Filter`.
+ */
+export function capped<T>(items: T[], limit: number): { vist: T[]; avkortet?: string } {
+  if (items.length <= limit) return { vist: items };
+  return {
+    vist: items.slice(0, limit),
+    avkortet: `Viser ${limit} av ${items.length}. Øk «maksAntall» eller snevre inn filteret.`,
+  };
+}
+
+/**
+ * Where the message is, preferring upstream's shorter rendering.
+ *
+ * `descriptionOfLocation` repeats the municipality and county once per endpoint
+ * ("E6 X i Stange, Innlandet - E6 Y i Stange, Innlandet"); the simple form states them
+ * once. Shorter and easier to read, so it is the default with the long form as fallback.
+ */
+export function placeOf(message: Message): string {
+  return (
+    message.locationDescriptionDetails?.simpleLocationDescription ??
+    message.descriptionOfLocation ??
+    ""
+  );
+}
+
+/** Strips a message down to what a reader actually needs to decide something. */
 export function summarise(message: Message, journey?: { from: Date; to: Date }): Summary {
   const regulations = (message.trafficRegulations ?? [])
     .map((r) => r.description)
     .filter((d): d is string => Boolean(d));
 
+  const appliesOnJourney = journey
+    ? appliesBetween(message, journey.from, journey.to)
+    : undefined;
+
+  // Prose about WHEN only helps when the answer is not already "while you drive past".
+  const needsSchedule = appliesOnJourney !== true;
+
   return {
-    id: message.id,
-    sted: message.descriptionOfLocation ?? "",
+    sted: placeOf(message),
     // The pipe is upstream's separator between the event and its consequences.
     melding: (message.descriptionOfTrafficMessage ?? "").split("|").join(" ").trim(),
     veier: roadsOf(message),
     virkning: message.trafficImpact ?? "unknown",
     vegstatus: message.trafficStatus ?? "ukjent",
     gjelderNaa: appliesAt(message, new Date()),
-    ...(journey ? { gjelderPaaReisen: appliesBetween(message, journey.from, journey.to) } : {}),
-    ...(message.validPeriodText ? { naarGjelderDen: message.validPeriodText } : {}),
-    ...(message.startTime ? { start: message.startTime } : {}),
+    ...(appliesOnJourney !== undefined ? { gjelderPaaReisen: appliesOnJourney } : {}),
+    ...(needsSchedule && message.validPeriodText
+      ? { naarGjelderDen: message.validPeriodText }
+      : {}),
     ...(message.estimatedEndTime ? { antattSlutt: message.estimatedEndTime } : {}),
     ...(message.nextTrafficStatus?.nextChangeTime
       ? {
@@ -112,6 +159,5 @@ export function summarise(message: Message, journey?: { from: Date; to: Date }):
       : {}),
     ...(message.location?.isInTunnel ? { iTunnel: true } : {}),
     kommuner: [...municipalitiesOf(message)],
-    fylker: [...countiesOf(message)],
   };
 }

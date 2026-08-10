@@ -71,32 +71,62 @@ Eller i `.mcp.json`:
 
 ### `langs_ruta`
 
-Trafikkmeldinger for en konkret biltur. Oppgi kommunene ruta går gjennom, og gjerne når du
-kjører.
+Trafikkmeldinger for en konkret biltur. Definer strekningen med **fylker eller kommuner**, og
+gjerne når du kjører.
 
 ```jsonc
 {
-  "kommuner": ["Eidsvoll", "Stange", "Ringsaker", "Lillehammer", "Øyer", "Ringebu"],
+  "fylker": ["Akershus", "Innlandet"],
   "vei": ["E6", "fv27"],
   "avreise": "2026-08-10T16:00:00+02:00",
   "ankomst": "2026-08-10T22:00:00+02:00"
 }
 ```
 
+**Bruk fylker når du er usikker.** Kommuner er mer presist, men utelater du én, forsvinner
+meldingene der uten et ord — og fylke kombinert med veinummer treffer nesten like presist.
+Feil skal helle mot å vise for mye, ikke for lite.
+
 Svaret skiller det som **treffer deg** fra det som bare er registrert på strekningen:
 
 ```jsonc
 {
-  "antallPaaRuta": 12,
-  "antallSomTrefferDeg": 7,
-  "merknad": "12 meldinger er registrert på strekningen; 7 av dem gjelder i reisevinduet ditt.",
+  "antallPaaRuta": 19,
+  "antallSomTrefferDeg": 13,
+  "antallVist": 3,
+  "avkortet": "Viser 3 av 13. Øk «maksAntall» eller snevre inn filteret.",
+  "merknad": "19 meldinger er registrert på strekningen; 13 av dem gjelder i reisevinduet ditt.",
   "meldinger": [ /* verst først */ ],
-  "ikkeIReisevinduet": [ /* med begrunnelse for hvorfor de ikke gjelder */ ]
+  "ikkeIReisevinduet": [ /* med når de faktisk gjelder */ ]
 }
 ```
 
-Begge tallene oppgis med vilje. Ser du bare det ene, kan du ikke skille «rein vei» fra «feil
-tidsfilter».
+Alle tallene oppgis med vilje. Ser du bare ett av dem, kan du ikke skille «rein vei» fra «feil
+tidsfilter» fra «lista ble kappet».
+
+### Svarformat per melding
+
+```jsonc
+{
+  "sted": "E6 Strandløkken - Strandlykkja, Stange, Innlandet, retning mot Gardermoen",
+  "melding": "Vegarbeid, vegen er stengt. Omkjøring er skiltet.",
+  "veier": ["E6"],
+  "virkning": "large",          // none | small | large | very_large | unknown
+  "vegstatus": "RoadClosed",    // RoadOpen | Regulation | RoadClosed
+  "gjelderNaa": false,
+  "gjelderPaaReisen": true,     // kun når du har oppgitt et reisevindu
+  "naarGjelderDen": "...",      // kun når den IKKE gjelder på reisen din
+  "antattSlutt": "2026-08-14T06:00:00+02:00",
+  "nesteEndring": "RoadClosed fra 2026-08-10T20:00:00+02:00",
+  "omkjoeringSkiltet": true,
+  "iTunnel": true,
+  "kommuner": ["Stange"]
+}
+```
+
+Felter utelates når de ikke bærer informasjon. `naarGjelderDen` følger for eksempel bare med
+når meldingen *ikke* treffer reisen din — da er «når gjelder den da» hele poenget; treffer den
+deg, sier `melding` allerede det du trenger.
 
 ### `trafikkmeldinger`
 
