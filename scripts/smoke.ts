@@ -6,8 +6,10 @@ import { selectMessages, summarise } from "../src/select.js";
 /**
  * End-to-end check against the real API and the real server process.
  *
- * Kept out of `npm test` on purpose: it needs the network, and a red build should mean
- * "the code is wrong", not "the office wifi is down".
+ * Lives outside `test/` on purpose. It needs the network, and a red build should mean
+ * "the code is wrong", not "the wifi is down" — and `node --test <dir>` runs every file
+ * in the directory it is given, so a network-dependent file placed there would be swept
+ * into the unit-test run.
  *
  * It speaks MCP over stdio to a spawned server rather than importing the tools directly.
  * A unit test that imports a module never finds out whether the command starts at all —
