@@ -3,6 +3,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { clearCache, fetchMessages } from "./api.js";
+import {
+  WEEKDAYS,
+  clearCountsCache,
+  fetchHours,
+  fetchPoints,
+  profileFor,
+  weekdayOf,
+} from "./counts.js";
+import { normalisePlace, normaliseRoad } from "./roads.js";
 import { capped, placeOf, selectMessages, summarise, type Filter } from "./select.js";
 import { IMPACT_LEVELS, TrafficError, type Impact } from "./types.js";
 import { appliesBetween } from "./validity.js";
@@ -212,28 +221,163 @@ server.registerTool(
     }),
 );
 
+/** Today's date where the traffic is, not where the process happens to run. */
+function todayInOslo(): string {
+  // sv-SE formats as YYYY-MM-DD, which is what `weekdayOf` parses.
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Oslo" }).format(new Date());
+}
+
+server.registerTool(
+  "naar_bor_jeg_kjore",
+  {
+    title: "Når er det stille på denne veien?",
+    description:
+      "Typisk trafikkmengde time for time på en gitt ukedag, målt av Vegvesenets tellepunkter — " +
+      "sløyfer i asfalten som teller hver bil som passerer. Svarer på «når bør jeg dra» og " +
+      "«hvor mye sparer jeg på å vente en time», ikke på hva som skjer akkurat nå. " +
+      "Tallene er medianer over flere uker, så én stengt vei eller én helligdag flytter dem ikke. " +
+      "Merk: et tellepunkt vet alt om sitt eget punkt og ingenting om veien mellom punktene. " +
+      "Skal du vite om det er vegarbeid eller stengt vei, bruk «langs_ruta».",
+    inputSchema: {
+      vei: z
+        .array(z.string())
+        .optional()
+        .describe("Veinummer, f.eks. [\"E6\"]. Bare tall matcher alle veiklasser."),
+      kommune: z
+        .array(z.string())
+        .optional()
+        .describe("Kommunenavn med æøå, f.eks. [\"Moss\"]. «Oyer» gir null treff."),
+      fylke: z.array(z.string()).optional().describe("Fylkesnavn med æøå, f.eks. [\"Østfold\"]."),
+      ukedag: z
+        .enum(WEEKDAYS)
+        .optional()
+        .describe("Hvilken ukedag du planlegger å kjøre. Standard: i dag."),
+      uker: z
+        .number()
+        .int()
+        .min(1)
+        .max(8)
+        .optional()
+        .describe("Hvor mange uker historikk medianen bygger på. Standard 4."),
+      maksPunkter: z.number().int().positive().max(5).optional().describe("Standard 3."),
+    },
+  },
+  async (args) =>
+    run(async () => {
+      const roads = new Set((args.vei ?? []).flatMap(normaliseRoad).map((r) => r.toUpperCase()));
+      const municipalities = new Set((args.kommune ?? []).map(normalisePlace));
+      const counties = new Set((args.fylke ?? []).map(normalisePlace));
+      if (!roads.size && !municipalities.size && !counties.size) {
+        throw new TrafficError(
+          "Oppgi «vei», «kommune» eller «fylke» — ellers ville svaret vært hele Norge.",
+        );
+      }
+
+      const points = (await fetchPoints()).filter(
+        (p) =>
+          (!roads.size || (p.road !== null && roads.has(p.road))) &&
+          (!municipalities.size ||
+            (p.municipality !== null && municipalities.has(normalisePlace(p.municipality)))) &&
+          (!counties.size || (p.county !== null && counties.has(normalisePlace(p.county)))),
+      );
+
+      const weekdayName = args.ukedag ?? WEEKDAYS[weekdayOf(todayInOslo()) - 1]!;
+      const weekday = WEEKDAYS.indexOf(weekdayName) + 1;
+      const weeks = args.uker ?? 4;
+      const to = new Date();
+      const from = new Date(to.getTime() - weeks * 7 * 24 * 3600_000);
+
+      const { vist, avkortet } = capped(points, args.maksPunkter ?? 3);
+
+      const målt = await Promise.all(
+        vist.map(async (point) => {
+          const { hours, discarded } = profileFor(await fetchHours(point.id, from, to), weekday);
+          const sted = [point.municipality, point.county].filter(Boolean).join(", ");
+          const base = {
+            punkt: point.name,
+            ...(point.road ? { vei: point.road } : {}),
+            ...(sted ? { sted } : {}),
+            ...(point.direction ? { retning: point.direction } : {}),
+          };
+
+          if (hours.length === 0) {
+            return { ...base, merknad: `Ingen brukbare målinger på ${weekdayName} i perioden.` };
+          }
+
+          const busiest = hours.reduce((a, b) => (b.typical > a.typical ? b : a));
+          // Daytime only: 04:00 is always the quietest hour and never the advice
+          // anyone was asking for.
+          const daytime = hours.filter((h) => h.hour >= 6 && h.hour <= 21);
+          const calmest = daytime.length
+            ? daytime.reduce((a, b) => (b.typical < a.typical ? b : a))
+            : null;
+
+          return {
+            ...base,
+            typiskPerTime: Object.fromEntries(
+              hours.map((h) => [String(h.hour).padStart(2, "0"), h.typical]),
+            ),
+            toppTime: { time: busiest.hour, biler: busiest.typical },
+            ...(calmest ? { roligsteDagtid: { time: calmest.hour, biler: calmest.typical } } : {}),
+            // A median of two weeks is a median of two numbers; say so rather than
+            // let a thin sample look like a measured fact.
+            ukerBakTallene: Math.max(...hours.map((h) => h.samples)),
+            ...(discarded ? { forkastedeTimer: discarded } : {}),
+          };
+        }),
+      );
+
+      return {
+        ukedag: weekdayName,
+        basertPaa: { uker: weeks, fra: from.toISOString(), til: to.toISOString() },
+        antallPunkterFunnet: points.length,
+        antallVist: vist.length,
+        ...(avkortet ? { avkortet } : {}),
+        merknad:
+          "Tall er biler per time, median over ukene i perioden. Timer der sensoren målte " +
+          "under 90 % av tiden er forkastet, ikke skalert.",
+        punkter: målt,
+      };
+    }),
+);
+
 server.registerTool(
   "doctor",
   {
     title: "Svarer Vegvesenet akkurat nå?",
     description:
-      "Kaller det ekte endepunktet og rapporterer om det svarer, hvor lang tid det tok og " +
-      "hvor mange meldinger som ble hentet. Bruk denne når et av de andre verktøyene " +
-      "oppfører seg rart, eller for å se om API-et har endret kontrakt.",
+      "Kaller begge de ekte endepunktene — trafikkmeldinger og tellepunkter — og rapporterer " +
+      "om de svarer, hvor lang tid det tok og hvor mye som ble hentet. Bruk denne når et av " +
+      "de andre verktøyene oppfører seg rart, eller for å se om et API har endret kontrakt.",
     inputSchema: {},
   },
   async () =>
     run(async () => {
       clearCache();
-      const started = Date.now();
+      clearCountsCache();
+
+      const startedMessages = Date.now();
       const messages = await fetchMessages(0);
-      const withRecurrence = messages.filter((m) => m.validityPeriods?.length).length;
+      const messageMs = Date.now() - startedMessages;
+
+      const startedPoints = Date.now();
+      const points = await fetchPoints(0);
+      const pointMs = Date.now() - startedPoints;
+
       return {
         status: "ok",
-        millisekunder: Date.now() - started,
-        antallMeldinger: messages.length,
-        medGjentakelsesregler: withRecurrence,
-        endepunkt: "traffic-info.atlas.vegvesen.no/traffic-information/messages",
+        meldinger: {
+          millisekunder: messageMs,
+          antall: messages.length,
+          medGjentakelsesregler: messages.filter((m) => m.validityPeriods?.length).length,
+          endepunkt: "traffic-info.atlas.vegvesen.no/traffic-information/messages",
+        },
+        tellepunkter: {
+          millisekunder: pointMs,
+          antall: points.length,
+          medVeinummer: points.filter((p) => p.road).length,
+          endepunkt: "trafikkdata-api.atlas.vegvesen.no",
+        },
       };
     }),
 );

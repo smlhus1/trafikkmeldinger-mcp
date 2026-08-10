@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { fetchMessages } from "../src/api.js";
+import { fetchPoints } from "../src/counts.js";
 import { selectMessages, summarise } from "../src/select.js";
 
 /**
@@ -94,6 +95,21 @@ check(
 const sample = selectMessages(messages, { minImpact: "large" })[0];
 check("kan oppsummere en melding", Boolean(sample && summarise(sample).sted));
 
+// The counts API is a second upstream with its own notation. Both traps below are
+// invisible from the messages side, so they have to be checked against live data.
+const points = await fetchPoints(0);
+check("henter tellepunkter", points.length > 0, `${points.length} punkter`);
+check(
+  "tellepunkter skriver vei som RV19/EV6, ikke R19/E6",
+  points.some((p) => p.road?.startsWith("E")) && points.some((p) => p.road?.startsWith("F")),
+  "oversatt til meldingenes skrivemåte",
+);
+check(
+  "punktene bærer kommunenavn",
+  points.filter((p) => p.municipality).length > points.length / 2,
+  `${points.filter((p) => p.municipality).length}/${points.length}`,
+);
+
 console.log("\n2. Serveren som prosess (MCP over stdio)\n");
 
 const init = {
@@ -132,8 +148,18 @@ const missingArea = {
   params: { name: "langs_ruta", arguments: { vei: ["E6"] } },
 };
 
+const counts = {
+  jsonrpc: "2.0",
+  id: 5,
+  method: "tools/call",
+  params: {
+    name: "naar_bor_jeg_kjore",
+    arguments: { vei: ["E6"], kommune: ["Moss"], ukedag: "torsdag", uker: 2, maksPunkter: 1 },
+  },
+};
+
 try {
-  const replies = await callServer([init, list, call, missingArea]);
+  const replies = await callServer([init, list, call, missingArea, counts]);
 
   const listed = replies.find((r) => r.id === 2) as
     | { result?: { tools?: { name: string }[] } }
@@ -141,8 +167,10 @@ try {
   const names = (listed?.result?.tools ?? []).map((t) => t.name).sort();
   check("serveren starter og svarer på tools/list", names.length > 0, names.join(", "));
   check(
-    "alle tre verktøyene er registrert",
-    ["doctor", "langs_ruta", "trafikkmeldinger"].every((n) => names.includes(n)),
+    "alle fire verktøyene er registrert",
+    ["doctor", "langs_ruta", "naar_bor_jeg_kjore", "trafikkmeldinger"].every((n) =>
+      names.includes(n),
+    ),
   );
 
   const called = replies.find((r) => r.id === 3) as
@@ -174,6 +202,24 @@ try {
     "uten fylker/kommuner avvises kallet med en brukbar beskjed",
     refused?.result?.isError === true &&
       /fylker|kommuner/i.test(refused.result.content?.[0]?.text ?? ""),
+  );
+
+  const counted = replies.find((r) => r.id === 5) as
+    | { result?: { isError?: boolean; content?: { text?: string }[] } }
+    | undefined;
+  const countText = counted?.result?.content?.[0]?.text ?? "";
+  check("naar_bor_jeg_kjore svarer uten feil", counted?.result?.isError !== true, countText.slice(0, 100));
+
+  const profile = countText ? JSON.parse(countText) : {};
+  const point = profile.punkter?.[0];
+  check("fant et tellepunkt på E6 i Moss", Boolean(point?.punkt), point?.punkt);
+  check("profilen dekker et døgn", Object.keys(point?.typiskPerTime ?? {}).length >= 20);
+  // Rush hour is the whole reason this tool exists: if the busiest hour lands at 04,
+  // the weekday or the aggregation is wrong, not the traffic.
+  check(
+    "travleste time er på dagtid",
+    point?.toppTime?.time >= 6 && point?.toppTime?.time <= 20,
+    `kl. ${point?.toppTime?.time} med ${point?.toppTime?.biler} biler`,
   );
 
   console.log(`\n   ${parsed.merknad ?? "(ingen merknad)"}`);

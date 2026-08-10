@@ -1,7 +1,8 @@
 # trafikkmeldinger-mcp
 
-MCP-server for **norske trafikkmeldinger** — vegarbeid, stengte veier og omkjøringer fra
-Statens vegvesen, filtrert på ruta di og **når du faktisk kjører**.
+MCP-server for **norsk veitrafikk** — vegarbeid, stengte veier og omkjøringer fra Statens
+vegvesen, filtrert på ruta di og **når du faktisk kjører**. Og hvor mange biler som faktisk
+kjører der, time for time, så «når bør jeg dra» slutter å være gjetting.
 
 **Ingen API-nøkkel.** Endepunktet er åpent — klon, bygg, kjør.
 
@@ -25,7 +26,7 @@ meldingen på hele turen.
 Vegvesenet publiserer heldigvis gjentakelsene som **strukturerte data**, ikke bare som prosa.
 Denne serveren tolker dem, slik at du kan spørre om et *framtidig* tidspunkt.
 
-## To feller denne serveren lukker
+## Tre feller denne serveren lukker
 
 **1. Fylkesveier lagres med kategoribokstav.** Det alle skriver som «fv. 27» eller bare «27»
 ligger som `F27`. Et filter på strengen `"27"` gir null treff — og null treff ser nøyaktig ut
@@ -36,7 +37,12 @@ et bart tall utvides til alle fire veiklassene (`E27`, `R27`, `F27`, `K27`) fram
 meldinger — 2 av 1 293 målt 10. august 2026. Kommunen står i `locationDescriptionDetails`. Et
 geografisk filter bygget på det strukturerte-utseende feltet alene mister nesten alt.
 
-Begge er dekket av tester, så en regresjon gir rødt bygg.
+**3. De to Vegvesen-API-ene skriver veinummer ulikt.** Et tellepunkt oppgir veien sin som
+`RV19`, `EV6`, `KV2620`. En trafikkmelding skriver `R19`, `E6`, `K2620`. Samme etat, to
+konvensjoner — og filtrerer du tellepunkter med meldingenes skrivemåte, får du null treff.
+Serveren oversetter til én skrivemåte i `roadOfPoint`, slik at resten av koden bare ser den ene.
+
+Alle tre er dekket av tester, så en regresjon gir rødt bygg.
 
 ## Installasjon
 
@@ -143,10 +149,49 @@ Uten `tidspunkt` får du alt som er registrert, også nattarbeid som ikke er akt
 Oppgi `tidspunkt` (ISO) for å se kun det som faktisk gjelder da — gjentakelsesreglene tolkes,
 så en tunnel stengt 20:00–06:00 dukker opp for kl. 21 og ikke for kl. 12.
 
+### `naar_bor_jeg_kjore`
+
+Typisk trafikkmengde time for time på en gitt ukedag — svarer på **når du bør dra**, ikke på
+hva som skjer akkurat nå.
+
+```jsonc
+{ "vei": ["E6"], "kommune": ["Moss"], "ukedag": "torsdag", "uker": 4 }
+```
+
+Dataene kommer fra tellepunkter: sløyfer og radar i asfalten som teller hver eneste bil som
+passerer. Det er en måling, ikke et estimat — men den vet bare noe om selve punktet, ingenting
+om veien mellom punktene.
+
+```jsonc
+{
+  "ukedag": "torsdag",
+  "antallPunkterFunnet": 1,
+  "punkter": [{
+    "punkt": "Storebaug",
+    "vei": "E6",
+    "sted": "Moss, Østfold",
+    "typiskPerTime": { "06": 1398, "07": 1947, /* ... */ "15": 4709, /* ... */ "22": 1132 },
+    "toppTime": { "time": 15, "biler": 4709 },
+    "roligsteDagtid": { "time": 6, "biler": 1398 },
+    "ukerBakTallene": 4
+  }]
+}
+```
+
+Tre valg verdt å vite om:
+
+- **Median, ikke gjennomsnitt.** Én stengt vei, én helligdag eller én festival flytter et
+  gjennomsnitt med hundrevis av biler, og da beskriver tallet en uke som aldri skjer.
+- **Timer med under 90 % dekning forkastes, ikke skaleres.** En halvdød sensor rapporterer
+  omtrent halve trafikken — det ser ut som en stille vei, og det er den farligste løgnen
+  denne serveren kan fortelle.
+- **`ukerBakTallene` står i svaret.** En median av to uker er en median av to tall. Det skal
+  du få vite, ikke gjette.
+
 ### `doctor`
 
-Kaller det ekte endepunktet og rapporterer svartid, antall meldinger og hvor mange som har
-gjentakelsesregler. Bruk den når noe oppfører seg rart.
+Kaller **begge** de ekte endepunktene og rapporterer svartid, antall meldinger, hvor mange som
+har gjentakelsesregler, og hvor mange tellepunkter som svarer. Bruk den når noe oppfører seg rart.
 
 ## Utvikling
 
@@ -160,17 +205,24 @@ Enhetstestene bruker en frosset fikstur slik at et rødt bygg alltid betyr «kod
 «wifi-en er nede». Røyktesten snakker MCP over stdio til en spawnet server — en test som bare
 importerer moduler finner aldri ut om kommandoen i det hele tatt starter.
 
-## Om datakilden
+## Om datakildene
 
-Data fra **Statens vegvesen**, hentet fra
-`traffic-info.atlas.vegvesen.no/traffic-information/messages` — det samme endepunktet som
-Vegvesenets egen trafikk-app bruker. Krever headeren `X-System-ID`, men ingen nøkkel eller
-registrering.
+Begge er fra **Statens vegvesen**, og ingen av dem krever nøkkel eller registrering.
 
-To ting som er lette å snuble i om du kaller endepunktet selv:
+**Trafikkmeldinger:** `traffic-info.atlas.vegvesen.no/traffic-information/messages` — det samme
+endepunktet som Vegvesenets egen trafikk-app bruker. Krever headeren `X-System-ID`.
+
+**Tellepunkter:** `trafikkdata-api.atlas.vegvesen.no` — et GraphQL-API over ~5 900 punkter som
+teller kjøretøy (10 000+ hvis du tar med sykkeltellere og punkter som er ute av drift; serveren
+filtrerer bort begge).
+
+Fire ting som er lette å snuble i om du kaller endepunktene selv:
 
 - **`Accept: application/json` gir 406.** Innholdstypen er
   `application/vnd.svv.v1+geo+json`, og innholdsforhandlingen er streng.
+- **Uten `X-System-ID` får du 400** med en feilmelding som ikke nevner headeren.
+- **GraphQL-sider er maks 100.** `first: 101` feiler med «An unknown error occurred» — det er et
+  tak, ikke en anbefaling, så paginering er obligatorisk og ikke en optimalisering.
 - **Datex-feeden er ikke lenger åpen.**
   `datex-server-get-v3-1.atlas.vegvesen.no` svarer 401 og krever registrering.
 
