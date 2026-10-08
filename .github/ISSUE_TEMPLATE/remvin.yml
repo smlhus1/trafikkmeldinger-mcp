@@ -1,0 +1,29 @@
+# The issue form for Remvin's GitHub inbox (src/inbox.mjs). Copy it to .github/ISSUE_TEMPLATE/remvin.yml in an own
+# repo. The labels Mål, Akseptanse and Sjekk are what Remvin reads: do not rename them. The form sets the label
+# `remvin` itself. Remvin takes an issue only when Stian (smlhus1) both wrote it and labelled it, and runs it only
+# after his fingerprint-signed yes in the SMS app's morning digest.
+name: Oppgave til Remvin
+description: En endring Remvin skal skrive, med testene først. Krever ditt ja i SMS-appen.
+labels: [remvin]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Mål
+      description: Hva skal være annerledes når oppgaven er ferdig? Én eller to setninger.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Akseptanse
+      description: Hvordan ser du at det virker? Det Remvin skriver testene etter.
+    validations:
+      required: true
+  - type: input
+    id: check
+    attributes:
+      label: Sjekk
+      description: Én kommando som er grønn når det virker, for eksempel `npm test -- week`.
+    validations:
+      required: true
