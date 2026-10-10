@@ -24,6 +24,6 @@ body:
     id: check
     attributes:
       label: Sjekk
-      description: Én kommando som er grønn når det virker, for eksempel `npm test -- week`.
+      description: Én kommando som er rød i dag og grønn når det virker. Pek på en testfil som ikke finnes ennå, for eksempel `npm test -- src/lib/format.nan`. Remvin skriver den testen først; en sjekk som alt er grønn stopper oppgaven.
     validations:
       required: true
